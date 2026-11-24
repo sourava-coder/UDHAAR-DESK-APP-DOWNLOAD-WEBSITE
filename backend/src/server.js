@@ -34,6 +34,11 @@ const safeSettings = row => row ? ({
   version: row.version, fileSize: row.file_size, androidRequirement: row.android_requirement,
   iconUrl: row.icon_url || null, downloadReady: Boolean(row.download_path),
   demoVideoUrl: row.demo_video_url || null,
+  iconPath: row.icon_path || null,
+  demoVideoPath: row.demo_video_path || null,
+  demoVideoName: row.demo_video_name || null,
+  downloadPath: row.download_path || null,
+  downloadName: row.download_file_name || null,
   features: row.features || [], screenshots: row.screenshots || [],
   updatedAt: row.updated_at
 }) : null;
@@ -158,6 +163,34 @@ app.put('/api/admin/app', requireAdmin, asyncRoute(async (req, res) => {
   res.json({ message: 'App details updated.' });
 }));
 
+app.post('/api/admin/media/demo-video/upload-url', requireAdmin, asyncRoute(async (req, res) => {
+  const fileName = String(req.body?.fileName || '').trim();
+  const contentType = String(req.body?.contentType || '').trim();
+  if (!/^video\/(mp4|webm|quicktime)$/i.test(contentType)) {
+    return res.status(400).json({ error: 'Upload an MP4, WEBM or MOV application demo video.' });
+  }
+  const ext = path.extname(fileName).toLowerCase() || (contentType === 'video/webm' ? '.webm' : contentType === 'video/quicktime' ? '.mov' : '.mp4');
+  const objectPath = `demo-video/${Date.now()}-${crypto.randomUUID()}${ext}`;
+  const { data, error } = await supabase.storage.from(ASSETS_BUCKET).createSignedUploadUrl(objectPath);
+  if (error) throw error;
+  res.json({ signedUrl: data.signedUrl, objectPath, fileName });
+}));
+
+app.post('/api/admin/media/demo-video/confirm', requireAdmin, asyncRoute(async (req, res) => {
+  const objectPath = String(req.body?.objectPath || '').trim();
+  const fileName = String(req.body?.fileName || '').trim();
+  if (!objectPath.startsWith('demo-video/')) {
+    return res.status(400).json({ error: 'Invalid demo video path.' });
+  }
+  const { error } = await supabase.from('app_settings').update({
+    demo_video_path: objectPath,
+    demo_video_name: fileName,
+    updated_at: new Date().toISOString()
+  }).eq('slug', 'udhaar-desk');
+  if (error) throw error;
+  res.json({ message: 'demo-video uploaded successfully.' });
+}));
+
 app.post('/api/admin/upload/:kind', requireAdmin, upload.single('file'), asyncRoute(async (req, res) => {
   const kind = req.params.kind;
   const file = req.file;
@@ -203,6 +236,35 @@ app.post('/api/admin/upload/:kind', requireAdmin, upload.single('file'), asyncRo
     if (error) throw error;
   }
   res.status(201).json({ message: `${kind} uploaded successfully.` });
+}));
+
+app.delete('/api/admin/media/:kind', requireAdmin, asyncRoute(async (req, res) => {
+  const kind = req.params.kind;
+  if (!['icon', 'demo-video', 'release'].includes(kind)) {
+    return res.status(400).json({ error: 'Unsupported media type.' });
+  }
+  const field = kind === 'icon' ? 'icon_path' : kind === 'demo-video' ? 'demo_video_path' : 'download_path';
+  const nameField = kind === 'demo-video' ? 'demo_video_name' : kind === 'release' ? 'download_file_name' : null;
+  const { data: current, error: readError } = await supabase
+    .from('app_settings')
+    .select(field)
+    .eq('slug', 'udhaar-desk')
+    .single();
+  if (readError) throw readError;
+  const objectPath = current?.[field];
+  if (!objectPath) return res.status(404).json({ error: 'This file is already removed.' });
+
+  const bucket = kind === 'release' ? DOWNLOADS_BUCKET : ASSETS_BUCKET;
+  const { error: removeError } = await supabase.storage.from(bucket).remove([objectPath]);
+  if (removeError) throw removeError;
+
+  const update = { updated_at: new Date().toISOString(), [field]: null };
+  if (nameField) update[nameField] = null;
+  if (kind === 'release') update.file_size = 'To be updated';
+  const { error: updateError } = await supabase.from('app_settings').update(update).eq('slug', 'udhaar-desk');
+  if (updateError) throw updateError;
+
+  res.json({ message: `${kind} removed successfully.` });
 }));
 
 app.patch('/api/admin/reviews/:id', requireAdmin, asyncRoute(async (req, res) => {

@@ -338,6 +338,7 @@ function Admin({onClose,onUpdated}) {
   const [form,setForm] = useState(null);
   const [message,setMessage] = useState('');
   const [busy,setBusy] = useState(false);
+  const [uploadProgress,setUploadProgress]=useState('');
   const [loginError,setLoginError] = useState('');
 
   const authHeaders = () => ({ Authorization: `Bearer ${token}` });
@@ -369,11 +370,54 @@ function Admin({onClose,onUpdated}) {
   }
   async function upload(kind,file) {
     if(!file)return; setBusy(true);setMessage('');
+    setUploadProgress(`${kind} upload started`);
     try {
+      if(kind === 'demo-video') {
+        if(file.size > 150 * 1024 * 1024) throw new Error('Demo video exceeds 150 MB.');
+        const signed = await request('/api/admin/media/demo-video/upload-url',{
+          method:'POST',
+          headers:{...authHeaders(),'Content-Type':'application/json'},
+          body:JSON.stringify({fileName:file.name,contentType:file.type})
+        });
+        const signedResponse = await fetch(signed.signedUrl,{
+          method:'PUT',
+          headers:{'Content-Type':file.type},
+          body:file
+        });
+        if(!signedResponse.ok) throw new Error('Video upload failed. Please try a smaller MP4 or WEBM file.');
+        await request('/api/admin/media/demo-video/confirm',{
+          method:'POST',
+          headers:{...authHeaders(),'Content-Type':'application/json'},
+          body:JSON.stringify({objectPath:signed.objectPath,fileName:signed.fileName})
+        });
+        setUploadProgress('');
+        setMessage('demo-video uploaded successfully.');
+        await loadAdmin();
+        onUpdated();
+        return;
+      }
       const body=new FormData();body.append('file',file);
       await request(`/api/admin/upload/${kind}`,{method:'POST',headers:authHeaders(),body});
-      setMessage(`${kind} uploaded successfully.`);await loadAdmin();onUpdated();
-    }catch(e){setMessage(e.message)}finally{setBusy(false)}
+      setUploadProgress('');
+      setMessage(`${kind} uploaded successfully.`);
+      await loadAdmin();
+      onUpdated();
+    }catch(e){
+      setUploadProgress('');
+      setMessage(e.message);
+    }finally{setBusy(false)}
+  }
+  async function deleteMedia(kind) {
+    const label = kind === 'demo-video' ? 'demo video' : kind === 'release' ? 'release file' : 'app icon';
+    if(!confirm(`Remove the uploaded ${label}?`)) return;
+    setBusy(true); setMessage('');
+    try {
+      await request(`/api/admin/media/${kind}`,{method:'DELETE',headers:authHeaders()});
+      setMessage(`${label} removed successfully.`);
+      await loadAdmin();
+      onUpdated();
+    } catch(e){setMessage(e.message)}
+    finally{setBusy(false)}
   }
   async function reviewAction(id,status) {
     try { await request(`/api/admin/reviews/${id}`,{method:'PATCH',headers:{...authHeaders(),'Content-Type':'application/json'},body:JSON.stringify({status})}); await loadAdmin();onUpdated(); }
@@ -393,7 +437,13 @@ function Admin({onClose,onUpdated}) {
     <div className="admin-grid"><form className="admin-panel edit-panel" onSubmit={save}><div className="panel-title"><div><div className="eyebrow">APP CONTENT</div><h2>App information</h2></div><button className="primary-btn compact" disabled={busy}>Save changes</button></div>
       {form&&<><label>Application name</label><input value={form.appName} onChange={e=>setForm({...form,appName:e.target.value})}/><label>Tagline</label><input value={form.tagline} onChange={e=>setForm({...form,tagline:e.target.value})}/><label>Description</label><textarea className="admin-textarea" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/><div className="two-fields"><div><label>Version</label><input value={form.version} onChange={e=>setForm({...form,version:e.target.value})}/></div><div><label>File size</label><input value={form.fileSize} onChange={e=>setForm({...form,fileSize:e.target.value})}/></div></div><label>Android requirement</label><input value={form.androidRequirement} onChange={e=>setForm({...form,androidRequirement:e.target.value})}/><label>Features (one per line)</label><textarea className="admin-textarea" value={form.features} onChange={e=>setForm({...form,features:e.target.value})}/></>}
     </form>
-    <div className="admin-panel"><div className="eyebrow">MEDIA & RELEASE</div><h2>Manage files</h2><Upload label="App icon" hint="PNG, JPG or WEBP · max 8 MB" accept="image/*" onFile={f=>upload('icon',f)}/><Upload label="Application demo video" hint="MP4, WEBM or MOV · max 150 MB" accept="video/mp4,video/webm,video/quicktime" onFile={f=>upload('demo-video',f)}/><Upload label="Upload APK / release" hint="APK, AAB, ZIP or PDF · max 150 MB" accept=".apk,.aab,.zip,.pdf" onFile={f=>upload('release',f)}/><p className="storage-note"><ShieldCheck size={15}/> Files are stored in your private/public Supabase Storage buckets.</p></div></div>
+    <div className="admin-panel"><div className="eyebrow">MEDIA & RELEASE</div><h2>Manage files</h2>
+      {uploadProgress && <div className="upload-progress"><span/><b>{uploadProgress}</b></div>}
+      <MediaUpload label="App icon" hint="PNG, JPG or WEBP · max 8 MB" accept="image/*" kind="icon" currentName={data.settings.iconPath ? 'Icon uploaded' : ''} busy={busy} onUpload={f=>upload('icon',f)} onDelete={()=>deleteMedia('icon')} />
+      <MediaUpload label="Application demo video" hint="MP4, WEBM or MOV · max 150 MB" accept="video/mp4,video/webm,video/quicktime" kind="demo-video" currentName={data.settings.demoVideoName || (data.settings.demoVideoPath ? 'Demo video uploaded' : '')} busy={busy} onUpload={f=>upload('demo-video',f)} onDelete={()=>deleteMedia('demo-video')} />
+      <MediaUpload label="Upload APK / release" hint="APK, AAB, ZIP or PDF · max 150 MB" accept=".apk,.aab,.zip,.pdf" kind="release" currentName={data.settings.downloadName || ''} busy={busy} onUpload={f=>upload('release',f)} onDelete={()=>deleteMedia('release')} />
+      <p className="storage-note"><ShieldCheck size={15}/> Files are stored in your private/public Supabase Storage buckets.</p>
+    </div></div>
     <div className="admin-panel admin-reviews"><div className="panel-title"><div><div className="eyebrow">COMMUNITY</div><h2>Review moderation</h2></div><span className="status-count">{data.reviews.filter(r=>r.status==='pending').length} pending</span></div>
       {data.reviews.length?data.reviews.map(r=><div className="moderation-row" key={r.id}><div className="moderation-content"><div className="moderation-name"><b>{r.reviewer_name}</b><Stars value={r.rating} size={13}/><span className={`review-status ${r.status}`}>{r.status}</span></div><p>{r.review_text}</p><small>{dateLabel(r.created_at)}</small></div><div className="moderation-actions">{r.status!=='approved'&&<button onClick={()=>reviewAction(r.id,'approved')}>Approve</button>}{r.status!=='rejected'&&<button onClick={()=>reviewAction(r.id,'rejected')}>Hide</button>}<button className="delete-btn" onClick={()=>deleteReview(r.id)}>Delete</button></div></div>):<p className="muted">No reviews have been submitted yet.</p>}
     </div>
@@ -404,6 +454,24 @@ function Admin({onClose,onUpdated}) {
 function Upload({label,hint,accept,onFile}) {
   const [file,setFile]=useState('');
   return <label className="upload-box"><span><b>{label}</b><small>{hint}</small>{file&&<em>{file}</em>}</span><span className="upload-choose">Choose file <ArrowRight size={14}/></span><input type="file" accept={accept} onChange={e=>{const f=e.target.files?.[0];if(f){setFile(f.name);onFile(f)}}}/></label>;
+}
+
+function MediaUpload({label,hint,accept,kind,currentName,busy,onUpload,onDelete}) {
+  const [file,setFile]=useState('');
+  return <div className="media-upload">
+    <div className="media-upload-head">
+      <div><b>{label}</b><small>{hint}</small></div>
+      {currentName && <div className="media-current"><span>Uploaded</span><b>{currentName}</b></div>}
+    </div>
+    <div className="media-actions">
+      <label className="media-replace" aria-disabled={busy}>
+        <input type="file" accept={accept} disabled={busy} onChange={e=>{const f=e.target.files?.[0];if(f){setFile(f.name);onUpload(f)}}}/>
+        {currentName ? 'Replace file' : 'Choose file'} <ArrowRight size={14}/>
+      </label>
+      {currentName && <button type="button" className="media-delete" disabled={busy} onClick={onDelete}>Delete</button>}
+    </div>
+    {file && <div className="media-selected">{file}</div>}
+  </div>;
 }
 
 export default App;
