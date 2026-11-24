@@ -6,7 +6,7 @@ export function requireAdmin(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Admin sign-in required.' });
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
-    if (payload.email !== (process.env.ADMIN_EMAIL || '').toLowerCase()) {
+    if (payload.role !== 'admin' || payload.access !== 'pin') {
       return res.status(403).json({ error: 'Not authorized.' });
     }
     req.admin = payload;

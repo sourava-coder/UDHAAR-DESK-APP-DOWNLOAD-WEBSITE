@@ -7,7 +7,7 @@ React/Vite public website and Node.js/Express admin API for the Udhaar Desk Andr
 - Frontend: React 18, Vite, CSS
 - Backend: Node.js, Express
 - Database and storage: Supabase
-- Authentication: bcrypt password hash and signed JWT
+- Authentication: 4-digit PIN and signed JWT
 - Deployment: Vercel frontend plus a Node-hosted backend
 
 ## Security rules
@@ -63,9 +63,7 @@ SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
 SUPABASE_ASSETS_BUCKET=app-assets
 SUPABASE_DOWNLOADS_BUCKET=app-downloads
 JWT_SECRET=generate-a-random-secret-of-at-least-32-characters
-ADMIN_EMAIL=your-admin-email@example.com
-ADMIN_PASSWORD_HASH=
-ADMIN_PASSWORD=
+ADMIN_PIN=1234
 IP_HASH_SALT=
 ```
 
@@ -74,15 +72,6 @@ Generate a secure JWT secret:
 ```powershell
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
-
-Create a password hash:
-
-```powershell
-cd backend
-npm run hash-password -- "YourStrongPassword"
-```
-
-Paste the generated bcrypt value into `ADMIN_PASSWORD_HASH`. Remove or leave `ADMIN_PASSWORD` empty. Never put the plain password in a committed file.
 
 Start the backend:
 
@@ -113,7 +102,7 @@ Open `http://localhost:5173`. `/admin` is the private login route.
 ## 5. Admin usage
 
 1. Open `/admin`.
-2. Sign in with the `ADMIN_EMAIL` and password configured in `backend/.env`.
+2. Enter the `ADMIN_PIN` configured in `backend/.env`.
 3. Update app details.
 4. Upload screenshots and the app icon.
 5. Upload a release file.
@@ -134,9 +123,7 @@ SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVICE_ROLE_KEY
 SUPABASE_ASSETS_BUCKET=app-assets
 SUPABASE_DOWNLOADS_BUCKET=app-downloads
 JWT_SECRET=your-random-production-secret
-ADMIN_EMAIL=your-admin-email@example.com
-ADMIN_PASSWORD_HASH=your-bcrypt-hash
-ADMIN_PASSWORD=
+ADMIN_PIN=1234
 IP_HASH_SALT=your-random-ip-hash-salt
 ```
 

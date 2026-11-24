@@ -13,7 +13,9 @@ create table if not exists public.app_settings (
   icon_path text,
   download_path text,
   download_file_name text,
-  features jsonb not null default '["Track customer balances","Record payments","View transaction history","Keep your records organized"]'::jsonb,
+  demo_video_path text,
+  demo_video_name text,
+  features jsonb not null default '["Customer ledger","Credit & payment entries","Overdue tracking","WhatsApp reminders","UPI links & QR","Store reports"]'::jsonb,
   screenshots jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now()
 );
@@ -50,3 +52,10 @@ on conflict (slug) do nothing;
 alter table public.app_settings enable row level security;
 alter table public.reviews enable row level security;
 alter table public.download_events enable row level security;
+
+-- The Express backend authenticates with the Supabase service-role/secret key.
+-- These grants are required for direct PostgreSQL operations through Supabase.
+grant usage on schema public to service_role;
+grant all privileges on table public.app_settings to service_role;
+grant all privileges on table public.reviews to service_role;
+grant all privileges on table public.download_events to service_role;

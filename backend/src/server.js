@@ -2,7 +2,6 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import rateLimit from 'express-rate-limit';
@@ -34,6 +33,7 @@ const safeSettings = row => row ? ({
   appName: row.app_name, tagline: row.tagline, description: row.description,
   version: row.version, fileSize: row.file_size, androidRequirement: row.android_requirement,
   iconUrl: row.icon_url || null, downloadReady: Boolean(row.download_path),
+  demoVideoUrl: row.demo_video_url || null,
   features: row.features || [], screenshots: row.screenshots || [],
   updatedAt: row.updated_at
 }) : null;
@@ -46,11 +46,16 @@ async function getSettings() {
     const { data: publicData } = supabase.storage.from(ASSETS_BUCKET).getPublicUrl(data.icon_path);
     icon_url = publicData.publicUrl;
   }
+  let demo_video_url = null;
+  if (data.demo_video_path) {
+    const { data: publicData } = supabase.storage.from(ASSETS_BUCKET).getPublicUrl(data.demo_video_path);
+    demo_video_url = publicData.publicUrl;
+  }
   const screenshots = (data.screenshots || []).map(item => {
     const { data: publicData } = supabase.storage.from(ASSETS_BUCKET).getPublicUrl(item.path);
     return { ...item, url: publicData.publicUrl };
   });
-  return { ...data, icon_url, screenshots };
+  return { ...data, icon_url, demo_video_url, screenshots };
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'udhaar-desk-portal-api' }));
@@ -114,17 +119,13 @@ app.get('/api/download', asyncRoute(async (req, res) => {
 }));
 
 app.post('/api/admin/login', loginLimiter, asyncRoute(async (req, res) => {
-  const email = String(req.body?.email || '').trim().toLowerCase();
-  const password = String(req.body?.password || '');
-  const adminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
-  if (!adminEmail || email !== adminEmail) return res.status(401).json({ error: 'Invalid email or password.' });
-
-  const hash = process.env.ADMIN_PASSWORD_HASH;
-  const valid = hash ? await bcrypt.compare(password, hash) : Boolean(process.env.ADMIN_PASSWORD) && password === process.env.ADMIN_PASSWORD;
-  if (!valid) return res.status(401).json({ error: 'Invalid email or password.' });
-
-  const token = jwt.sign({ email, role: 'admin' }, process.env.JWT_SECRET, { expiresIn: '8h' });
-  res.json({ token, email });
+  const pin = String(req.body?.pin || '').trim();
+  const adminPin = String(process.env.ADMIN_PIN || '').trim();
+  if (!/^\d{4}$/.test(pin) || !adminPin || pin !== adminPin) {
+    return res.status(401).json({ error: 'Invalid admin PIN.' });
+  }
+  const token = jwt.sign({ access: 'pin', role: 'admin' }, process.env.JWT_SECRET, { expiresIn: '8h' });
+  res.json({ token });
 }));
 
 app.get('/api/admin/overview', requireAdmin, asyncRoute(async (_req, res) => {
@@ -161,15 +162,19 @@ app.post('/api/admin/upload/:kind', requireAdmin, upload.single('file'), asyncRo
   const kind = req.params.kind;
   const file = req.file;
   if (!file) return res.status(400).json({ error: 'Choose a file first.' });
-  if (!['icon', 'screenshot', 'release'].includes(kind)) return res.status(400).json({ error: 'Unsupported upload type.' });
+  if (!['icon', 'demo-video', 'release'].includes(kind)) return res.status(400).json({ error: 'Unsupported upload type.' });
 
   const isRelease = kind === 'release';
+  const isDemoVideo = kind === 'demo-video';
   const allowed = isRelease
     ? /\.(apk|aab|zip|pdf)$/i.test(file.originalname)
-    : /^image\/(png|jpeg|webp|gif)$/i.test(file.mimetype);
-  if (!allowed) return res.status(400).json({ error: isRelease ? 'Allowed release files: APK, AAB, ZIP or PDF.' : 'Upload a PNG, JPG, WEBP or GIF image.' });
+    : isDemoVideo
+      ? /^video\/(mp4|webm|quicktime)$/i.test(file.mimetype)
+      : /^image\/(png|jpeg|webp|gif)$/i.test(file.mimetype);
+  if (!allowed) return res.status(400).json({ error: isRelease ? 'Allowed release files: APK, AAB, ZIP or PDF.' : isDemoVideo ? 'Upload an MP4, WEBM or MOV application demo video.' : 'Upload a PNG, JPG, WEBP or GIF image.' });
   if (isRelease && file.size > 150 * 1024 * 1024) return res.status(400).json({ error: 'Release file exceeds 150 MB.' });
-  if (!isRelease && file.size > 8 * 1024 * 1024) return res.status(400).json({ error: 'Images must be 8 MB or smaller.' });
+  if (isDemoVideo && file.size > 150 * 1024 * 1024) return res.status(400).json({ error: 'Demo video exceeds 150 MB.' });
+  if (!isRelease && !isDemoVideo && file.size > 8 * 1024 * 1024) return res.status(400).json({ error: 'Images must be 8 MB or smaller.' });
 
   const bucket = isRelease ? DOWNLOADS_BUCKET : ASSETS_BUCKET;
   const ext = path.extname(file.originalname).toLowerCase() || (isRelease ? '.apk' : '.png');
@@ -182,11 +187,12 @@ app.post('/api/admin/upload/:kind', requireAdmin, upload.single('file'), asyncRo
   if (kind === 'icon') {
     const { error } = await supabase.from('app_settings').update({ icon_path: objectPath, updated_at: new Date().toISOString() }).eq('slug', 'udhaar-desk');
     if (error) throw error;
-  } else if (kind === 'screenshot') {
-    const { data: current, error: readError } = await supabase.from('app_settings').select('screenshots').eq('slug', 'udhaar-desk').single();
-    if (readError) throw readError;
-    const screenshots = [...(current.screenshots || []), { path: objectPath, name: file.originalname }].slice(-8);
-    const { error } = await supabase.from('app_settings').update({ screenshots, updated_at: new Date().toISOString() }).eq('slug', 'udhaar-desk');
+  } else if (kind === 'demo-video') {
+    const { error } = await supabase.from('app_settings').update({
+      demo_video_path: objectPath,
+      demo_video_name: file.originalname,
+      updated_at: new Date().toISOString()
+    }).eq('slug', 'udhaar-desk');
     if (error) throw error;
   } else {
     const { error } = await supabase.from('app_settings').update({

@@ -51,7 +51,9 @@ function App() {
     try {
       const [a, r] = await Promise.all([request('/api/app'), request('/api/reviews')]);
       setApp(a.app); setStats(a.stats); setReviews(r.reviews || []); setError('');
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      setError('Website data is temporarily unavailable. Please try again in a moment.');
+    }
     finally {
       const remaining = Math.max(0, 700 - (Date.now() - startedAt));
       window.setTimeout(() => setLoading(false), remaining);
@@ -108,6 +110,35 @@ function App() {
   }
 
   const average = Number(stats.averageRating || 0).toFixed(1);
+  const featureItems = useMemo(() => {
+    const defaults = [
+      { title: 'Customer ledger', copy: 'See every customer balance and transaction in one store-specific ledger.' },
+      { title: 'Credit & payment entries', copy: 'Record purchases and payments quickly, with accurate running balances.' },
+      { title: 'Overdue tracking', copy: 'Identify old pending dues before they become difficult to recover.' },
+      { title: 'WhatsApp reminders', copy: 'Create ready-to-send reminders with balance and payment details.' },
+      { title: 'UPI links & QR', copy: 'Share UPI links or QR codes so customers can pay from their phone.' },
+      { title: 'Store reports', copy: 'Review collections and pending receivables for a clearer daily picture.' }
+    ];
+    const titles = app?.features?.length ? app.features : defaults.map(item => item.title);
+    const completeTitles = [...titles];
+    for (const item of defaults) {
+      if (!completeTitles.includes(item.title) && completeTitles.length < 6) completeTitles.push(item.title);
+    }
+    return completeTitles.slice(0, 6).map((title, index) => {
+      const defaultItem = defaults.find(item => item.title === title);
+      return defaultItem || {
+        title,
+        copy: [
+          'Manage this part of your store workflow with a clear and simple experience.',
+          'Keep every entry accurate and easy to find when it matters.',
+          'Stay informed with the information your store needs at a glance.',
+          'Reduce manual work with a faster, organized customer workflow.',
+          'Use one reliable place for payments, balances and follow-ups.',
+          'Review your store activity with clear and practical details.'
+        ][index % 6]
+      };
+    });
+  }, [app?.features]);
   if (adminOpen) return <Admin onClose={() => { history.pushState({}, '', '/'); setAdminOpen(false); }} onUpdated={load} />;
   if (loading) return <PageLoader />;
 
@@ -184,24 +215,7 @@ function App() {
       <section className="section container" id="features">
         <div className="section-heading"><div className="eyebrow">PRODUCT WORKFLOW</div><h2>One ledger.<br/><span>Every transaction.</span></h2><p>Built around the way store owners actually work: quick entries, clear balances and follow-ups that do not get lost.</p></div>
         <div className="feature-grid">
-          {(app?.features?.length ? app.features.map((title, index) => ({
-            title,
-            copy: [
-              'See every customer balance and transaction in one store-specific ledger.',
-              'Record purchases and payments quickly, with accurate running balances.',
-              'Identify old pending dues before they become difficult to recover.',
-              'Create ready-to-send WhatsApp reminders with balance and payment details.',
-              'Share UPI links or QR codes so customers can pay from their own phone.',
-              'Review collections and pending receivables for a clearer daily picture.'
-            ][index % 6]
-          })) : [
-            { title: 'Customer ledger', copy: 'See every customer balance and transaction in one store-specific ledger.' },
-            { title: 'Credit & payment entries', copy: 'Record purchases and payments quickly, with accurate running balances.' },
-            { title: 'Overdue tracking', copy: 'Identify old pending dues before they become difficult to recover.' },
-            { title: 'WhatsApp reminders', copy: 'Create ready-to-send reminders with balance and payment details.' },
-            { title: 'UPI links & QR', copy: 'Share UPI links or QR codes so customers can pay from their phone.' },
-            { title: 'Store reports', copy: 'Review collections and pending receivables for a clearer daily picture.' }
-          ]).map((feature,i) => {
+          {featureItems.map((feature,i) => {
             const icons = [WalletCards, Check, MessageSquareQuote, ShieldCheck];
             const Icon = icons[i % icons.length];
             return <article className="feature-card" key={feature.title}><div className={`feature-icon fi-${i%4}`}><Icon size={20}/></div><h3>{feature.title}</h3><p>{feature.copy}</p><span className="card-arrow"><ArrowUpRightFallback/></span></article>;
@@ -211,7 +225,20 @@ function App() {
 
       <section className="preview-section" id="screenshots"><div className="container preview-inner">
         <div className="section-heading"><div className="eyebrow">TAKE A CLOSER LOOK</div><h2>Designed for<br/><span>everyday use.</span></h2><p>Use Udhaar Desk from mobile or desktop for customer ledgers, credit entries, payments, reminders and reports.</p></div>
-        {app?.screenshots?.length ? <div className="screenshots">{app.screenshots.map((s,i)=><img key={s.path || i} src={s.url} alt={s.name || `Udhaar Desk screenshot ${i+1}`}/>)}</div> : <div className="screenshot-empty"><div className="empty-phone"><div className="empty-notch"/><img className="empty-screen-icon" src={app?.iconUrl || '/icon.png'} alt="Udhaar Desk"/><b>Udhaar Desk</b><span>App screenshots will appear here</span><div className="empty-bars"><i/><i/><i/></div></div><div className="empty-note"><Sparkles size={18}/><span><b>App preview gallery</b><small>Real screenshots can be added from the admin dashboard.</small></span></div></div>}
+        {app?.demoVideoUrl ? (
+          <div className="demo-video-wrap">
+            <video className="demo-video" src={app.demoVideoUrl} controls playsInline preload="metadata">
+              Your browser does not support HTML5 video.
+            </video>
+            <div className="video-caption"><span><b>How to use Udhaar Desk</b><small>Watch the app workflow</small></span><span className="video-duration">Demo video</span></div>
+          </div>
+        ) : (
+          <div className="video-empty">
+            <div className="video-empty-icon"><span>▶</span></div>
+            <b>Application demo</b>
+            <p>Upload a short walkthrough showing customer entries, payments and WhatsApp reminders.</p>
+          </div>
+        )}
       </div></section>
 
       <section className="download-section" id="download"><div className="container download-card">
@@ -306,8 +333,7 @@ function Faq({q,a}) {
 
 function Admin({onClose,onUpdated}) {
   const [token,setToken] = useState(sessionStorage.getItem('udhaar_admin_token') || '');
-  const [email,setEmail] = useState('');
-  const [password,setPassword] = useState('');
+  const [pin,setPin] = useState('');
   const [data,setData] = useState(null);
   const [form,setForm] = useState(null);
   const [message,setMessage] = useState('');
@@ -329,8 +355,8 @@ function Admin({onClose,onUpdated}) {
   async function login(e) {
     e.preventDefault(); setLoginError(''); setBusy(true);
     try {
-      const result = await request('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
-      sessionStorage.setItem('udhaar_admin_token',result.token); setToken(result.token); setPassword('');
+      const result = await request('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
+      sessionStorage.setItem('udhaar_admin_token',result.token); setToken(result.token); setPin('');
       await loadAdmin(result.token);
     } catch(e){setLoginError(e.message)} finally{setBusy(false)}
   }
@@ -359,7 +385,7 @@ function Admin({onClose,onUpdated}) {
     catch(e){setMessage(e.message)}
   }
   function logout(){sessionStorage.removeItem('udhaar_admin_token');setToken('');setData(null);setForm(null)}
-  if(!token || !data) return <div className="admin-screen"><div className="admin-login-card"><button className="admin-close" onClick={onClose}><X/></button><div className="admin-logo"><ShieldCheck/></div><div className="eyebrow">PRIVATE AREA</div><h1>Admin sign in</h1><p>Manage your Udhaar Desk download page.</p><form onSubmit={login}><label>Email address</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/><label>Password</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/><button className="primary-btn" disabled={busy}>{busy?'Signing in…':'Sign in'} <ArrowRight size={17}/></button>{loginError&&<div className="form-notice error">{loginError}</div>}</form><small>Authorized administrator only</small></div></div>;
+  if(!token || !data) return <div className="admin-screen"><div className="admin-login-card"><button className="admin-close" onClick={onClose}><X/></button><div className="admin-logo"><ShieldCheck/></div><div className="eyebrow">PRIVATE AREA</div><h1>Admin access</h1><p>Enter the 4-digit PIN to open the control panel.</p><form onSubmit={login}><label>4-digit PIN</label><input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" autoComplete="off" value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="••••" required/><button className="primary-btn" disabled={busy || pin.length !== 4}>{busy?'Checking…':'Open admin'} <ArrowRight size={17}/></button>{loginError&&<div className="form-notice error">{loginError}</div>}</form><small>Authorized administrator only</small></div></div>;
 
   return <div className="admin-screen"><div className="admin-wrap"><header className="admin-header"><div><div className="eyebrow">UDHAAR DESK / CONTROL CENTER</div><h1>Admin dashboard</h1><p>Administrator session active</p></div><div className="admin-head-actions"><button className="outline-btn" onClick={onClose}>View website <ExternalLink size={15}/></button><button className="dark-btn" onClick={logout}>Sign out</button></div></header>
     <div className="admin-metrics"><div><span>Total downloads</span><b>{Number(data.downloads).toLocaleString('en-IN')}</b></div><div><span>Total reviews</span><b>{data.reviews.length}</b></div><div><span>Pending reviews</span><b>{data.reviews.filter(r=>r.status==='pending').length}</b></div></div>
@@ -367,7 +393,7 @@ function Admin({onClose,onUpdated}) {
     <div className="admin-grid"><form className="admin-panel edit-panel" onSubmit={save}><div className="panel-title"><div><div className="eyebrow">APP CONTENT</div><h2>App information</h2></div><button className="primary-btn compact" disabled={busy}>Save changes</button></div>
       {form&&<><label>Application name</label><input value={form.appName} onChange={e=>setForm({...form,appName:e.target.value})}/><label>Tagline</label><input value={form.tagline} onChange={e=>setForm({...form,tagline:e.target.value})}/><label>Description</label><textarea className="admin-textarea" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/><div className="two-fields"><div><label>Version</label><input value={form.version} onChange={e=>setForm({...form,version:e.target.value})}/></div><div><label>File size</label><input value={form.fileSize} onChange={e=>setForm({...form,fileSize:e.target.value})}/></div></div><label>Android requirement</label><input value={form.androidRequirement} onChange={e=>setForm({...form,androidRequirement:e.target.value})}/><label>Features (one per line)</label><textarea className="admin-textarea" value={form.features} onChange={e=>setForm({...form,features:e.target.value})}/></>}
     </form>
-    <div className="admin-panel"><div className="eyebrow">MEDIA & RELEASE</div><h2>Manage files</h2><Upload label="App icon" hint="PNG, JPG or WEBP · max 8 MB" accept="image/*" onFile={f=>upload('icon',f)}/><Upload label="Add screenshot" hint="Image · max 8 MB · up to 8 shown" accept="image/*" onFile={f=>upload('screenshot',f)}/><Upload label="Upload APK / release" hint="APK, AAB, ZIP or PDF · max 150 MB" accept=".apk,.aab,.zip,.pdf" onFile={f=>upload('release',f)}/><p className="storage-note"><ShieldCheck size={15}/> Files are stored in your private/public Supabase Storage buckets.</p></div></div>
+    <div className="admin-panel"><div className="eyebrow">MEDIA & RELEASE</div><h2>Manage files</h2><Upload label="App icon" hint="PNG, JPG or WEBP · max 8 MB" accept="image/*" onFile={f=>upload('icon',f)}/><Upload label="Application demo video" hint="MP4, WEBM or MOV · max 150 MB" accept="video/mp4,video/webm,video/quicktime" onFile={f=>upload('demo-video',f)}/><Upload label="Upload APK / release" hint="APK, AAB, ZIP or PDF · max 150 MB" accept=".apk,.aab,.zip,.pdf" onFile={f=>upload('release',f)}/><p className="storage-note"><ShieldCheck size={15}/> Files are stored in your private/public Supabase Storage buckets.</p></div></div>
     <div className="admin-panel admin-reviews"><div className="panel-title"><div><div className="eyebrow">COMMUNITY</div><h2>Review moderation</h2></div><span className="status-count">{data.reviews.filter(r=>r.status==='pending').length} pending</span></div>
       {data.reviews.length?data.reviews.map(r=><div className="moderation-row" key={r.id}><div className="moderation-content"><div className="moderation-name"><b>{r.reviewer_name}</b><Stars value={r.rating} size={13}/><span className={`review-status ${r.status}`}>{r.status}</span></div><p>{r.review_text}</p><small>{dateLabel(r.created_at)}</small></div><div className="moderation-actions">{r.status!=='approved'&&<button onClick={()=>reviewAction(r.id,'approved')}>Approve</button>}{r.status!=='rejected'&&<button onClick={()=>reviewAction(r.id,'rejected')}>Hide</button>}<button className="delete-btn" onClick={()=>deleteReview(r.id)}>Delete</button></div></div>):<p className="muted">No reviews have been submitted yet.</p>}
     </div>
